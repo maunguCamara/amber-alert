@@ -1,0 +1,223 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Kenya Amber Alert Platform — Docker Compose
+#
+# Services:
+#   db          PostgreSQL 16 + PostGIS 3
+#   redis       Redis 7 (pub/sub + cache)
+#   minio       S3-compatible object storage (photo uploads)
+#   go-api      Go REST/WebSocket API
+#   clustering  Rust gRPC geo-clustering microservice
+#   php         PHP/Laravel web portal
+#   migrate     One-shot migration runner
+# ─────────────────────────────────────────────────────────────────────────────
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+
+  # ── PostgreSQL + PostGIS ────────────────────────────────────────────────────
+  db:
+    image: postgis/postgis:16-3.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       amber_alert
+      POSTGRES_USER:     amber
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_in_production}
+      TZ:                Africa/Nairobi
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amber -d amber_alert"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *default-logging
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning --requirepass ${REDIS_PASSWORD:-changeme}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *default-logging
+
+  # ── MinIO (S3-compatible storage for photos) ─────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER:     ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    logging: *default-logging
+
+  # ── Database migrations ──────────────────────────────────────────────────────
+  migrate:
+    image: postgres:16-alpine
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-changeme_in_production}
+    volumes:
+      - ./database/migrations:/migrations:ro
+    command: >
+      sh -c "
+        for f in /migrations/00[1-5]_*.sql; do
+          echo \"Running $$f\";
+          psql -h db -U amber -d amber_alert -f $$f;
+        done;
+        echo 'Migrations complete.'
+      "
+    restart: "no"
+    logging: *default-logging
+
+  # ── Rust clustering gRPC service ─────────────────────────────────────────────
+  clustering:
+    build:
+      context: ./rust-clustering
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      RUST_LOG:              amber_clustering=info
+      CLUSTER_LISTEN_ADDR:   0.0.0.0:50051
+    ports:
+      - "50051:50051"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 50051 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    logging: *default-logging
+
+  # ── Go API ───────────────────────────────────────────────────────────────────
+  go-api:
+    build:
+      context: ./go-api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      clustering:
+        condition: service_healthy
+    environment:
+      AMBER_ENVIRONMENT:           production
+      AMBER_PORT:                  8080
+      AMBER_DATABASE_URL:          postgres://amber:${POSTGRES_PASSWORD:-changeme_in_production}@db:5432/amber_alert?sslmode=disable
+      AMBER_REDIS_URL:             redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0
+      AMBER_JWT_SECRET:            ${JWT_SECRET:?JWT_SECRET must be set}
+      AMBER_JWT_ACCESS_TOKEN_TTL:  15m
+      AMBER_JWT_REFRESH_TOKEN_TTL: 168h
+      AMBER_S3_ENDPOINT:           http://minio:9000
+      AMBER_S3_BUCKET:             amber-alert-media
+      AMBER_S3_ACCESS_KEY:         ${MINIO_ROOT_USER:-minioadmin}
+      AMBER_S3_SECRET_KEY:         ${MINIO_ROOT_PASSWORD:-minioadmin}
+      AMBER_S3_REGION:             us-east-1
+      AMBER_S3_FORCE_PATH_STYLE:   "true"
+      AMBER_AT_API_KEY:            ${AT_API_KEY:-sandbox_key}
+      AMBER_AT_USERNAME:           ${AT_USERNAME:-sandbox}
+      AMBER_AT_SHORT_CODE:         ${AT_SHORT_CODE:-22384}
+      AMBER_CLUSTER_SERVICE_ADDR:  clustering:50051
+      AMBER_ALLOWED_ORIGINS:       "http://localhost:8000,https://amberalert.go.ke"
+      AMBER_RATE_LIMIT_RPM:        120
+      TZ:                          Africa/Nairobi
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    logging: *default-logging
+
+  # ── PHP / Laravel portal ──────────────────────────────────────────────────────
+  php:
+    build:
+      context: ./php-laravel
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      go-api:
+        condition: service_healthy
+    environment:
+      APP_NAME:              "Kenya Amber Alert"
+      APP_ENV:               production
+      APP_KEY:               ${APP_KEY:?APP_KEY must be set}
+      APP_DEBUG:             "false"
+      APP_URL:               ${APP_URL:-http://localhost:8000}
+
+      DB_CONNECTION:         pgsql
+      DB_HOST:               db
+      DB_PORT:               5432
+      DB_DATABASE:           amber_alert
+      DB_USERNAME:           amber
+      DB_PASSWORD:           ${POSTGRES_PASSWORD:-changeme_in_production}
+
+      CACHE_DRIVER:          redis
+      SESSION_DRIVER:        redis
+      QUEUE_CONNECTION:      redis
+
+      REDIS_HOST:            redis
+      REDIS_PASSWORD:        ${REDIS_PASSWORD:-changeme}
+      REDIS_PORT:            6379
+
+      # Go API base URL (internal Docker network)
+      AMBER_API_URL:         http://go-api:8080
+      AMBER_WS_URL:          ws://go-api:8080/ws
+      AMBER_API_TIMEOUT:     10
+
+      AT_API_KEY:            ${AT_API_KEY:-sandbox_key}
+      AT_USERNAME:           ${AT_USERNAME:-sandbox}
+      AT_SHORT_CODE:         ${AT_SHORT_CODE:-22384}
+
+      TZ:                    Africa/Nairobi
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "php artisan health || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+    logging: *default-logging
+
+volumes:
+  db_data:
+  redis_data:
+  minio_data:
+
+networks:
+  default:
+    name: amber_alert_net
