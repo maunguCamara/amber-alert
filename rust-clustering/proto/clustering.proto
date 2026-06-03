@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package clustering;
+
+// ─── Input ────────────────────────────────────────────────────────────────────
+
+message CasePoint {
+  string id           = 1;
+  string reference_no = 2;
+  double lat          = 3;
+  double lng          = 4;
+  string status       = 5; // active | review | resolved
+  string county       = 6;
+}
+
+message ClusterRequest {
+  repeated CasePoint points    = 1;
+  double             zoom      = 2;  // Leaflet zoom level 1–18
+  double             radius_km = 3;  // Clustering radius; if 0, derived from zoom
+}
+
+// ─── Output ───────────────────────────────────────────────────────────────────
+
+message ClusterItem {
+  oneof item {
+    Cluster    cluster = 1;
+    CasePoint  point   = 2;  // lone point not merged into any cluster
+  }
+}
+
+message Cluster {
+  string id           = 1;  // deterministic hash of contained IDs
+  double lat          = 2;  // centroid latitude
+  double lng          = 3;  // centroid longitude
+  int32  count        = 4;  // total cases
+  int32  active_count = 5;
+  string county       = 6;  // dominant county (most cases)
+  repeated string case_ids = 7;
+}
+
+message ClusterResponse {
+  repeated ClusterItem items    = 1;
+  int32                total_in = 2;   // total input points
+}
+
+// ─── Nearest-neighbours query ─────────────────────────────────────────────────
+
+message NearbyRequest {
+  double lat        = 1;
+  double lng        = 2;
+  double radius_km  = 3;
+  int32  limit      = 4;
+  repeated CasePoint points = 5;
+}
+
+message NearbyResponse {
+  repeated CasePoint points = 1;
+}
+
+// ─── Service ──────────────────────────────────────────────────────────────────
+
+service GeoClusterService {
+  // Cluster a list of geo-points for map display at a given zoom level.
+  rpc Cluster (ClusterRequest) returns (ClusterResponse);
+
+  // Return the N nearest active cases to a given coordinate.
+  rpc NearbyPoints (NearbyRequest) returns (NearbyResponse);
+}
