@@ -7,6 +7,11 @@ edition = "2021"
 name = "amber-clustering"
 path = "src/main.rs"
 
+# Expose modules for integration tests under tests/
+[lib]
+name = "amber_clustering"
+path = "src/lib.rs"
+
 [dependencies]
 # gRPC server
 tonic        = { version = "0.11", features = ["transport"] }
