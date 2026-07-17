@@ -1,0 +1,48 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Kenya Amber Alert — Go API local dev config
+# Place at amber-alert/go-api/config.yaml
+# Env vars (AMBER_*) override any value here.
+# ──────────────────────────────────────────────────────────────────────────────
+
+environment: development
+port: 8080
+
+# Postgres + PostGIS — peer auth works if DB user == your Linux username.
+# If you set a password, use: postgres://USER:PASS@localhost:5432/amber_alert_dev
+database_url: "postgres://localhost/amber_alert_dev?sslmode=disable"
+
+redis_url: "redis://127.0.0.1:6379/0"
+
+# Dev JWT secret — change for production.
+jwt_secret: "dev-secret-key-change-in-production-32"
+jwt_access_token_ttl: "15m"
+jwt_refresh_token_ttl: "168h"
+
+# ── Local file storage (no MinIO needed for dev) ──────────────────────────────
+# The Go storage client will use path-style addressing against a local MinIO
+# if you install it, or you can stub it out — photos upload to /tmp in dev.
+s3_endpoint:         ""          # leave empty to skip S3 in dev
+s3_bucket:           "amber-dev"
+s3_access_key:       "devkey"
+s3_secret_key:       "devsecret"
+s3_region:           "us-east-1"
+s3_force_path_style: true
+
+# ── Africa's Talking sandbox ──────────────────────────────────────────────────
+# Sign up free at africastalking.com → Sandbox → API Key
+at_api_key:   "sandbox_key"
+at_username:  "sandbox"
+at_short_code: "22384"
+
+# ── Rust clustering gRPC ─────────────────────────────────────────────────────
+cluster_service_addr: "localhost:50051"
+
+# ── CORS — allow Laravel dev server ──────────────────────────────────────────
+allowed_origins:
+  - "http://localhost:8000"
+  - "http://127.0.0.1:8000"
+
+# ── Rate limiting — relaxed for local testing ─────────────────────────────────
+rate_limit_rpm: 600
+
+max_upload_bytes: 10485760   # 10 MB
