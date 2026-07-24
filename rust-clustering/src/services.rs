@@ -1,26 +1,25 @@
 use tonic::{Request, Response, Status};
 
-use crate::clustering;
+// Import proto types from the crate root (whichever root is compiling us —
+// lib.rs for tests, main.rs for the binary — both define `mod proto`).
 use crate::proto::{
     geo_cluster_service_server::GeoClusterService,
     ClusterRequest, ClusterResponse,
     NearbyRequest, NearbyResponse,
-    ClusterItem,
 };
+use crate::clustering;
 
 pub struct ClusterServiceImpl;
 
 #[tonic::async_trait]
 impl GeoClusterService for ClusterServiceImpl {
-    /// Cluster a set of CasePoints at the requested zoom level.
     async fn cluster(
         &self,
         req: Request<ClusterRequest>,
     ) -> Result<Response<ClusterResponse>, Status> {
         let inner = req.into_inner();
-
         let zoom      = inner.zoom.clamp(1.0, 18.0);
-        let radius_km = inner.radius_km;   // 0 means "derive from zoom"
+        let radius_km = inner.radius_km;
 
         if inner.points.is_empty() {
             return Ok(Response::new(ClusterResponse {
@@ -29,7 +28,6 @@ impl GeoClusterService for ClusterServiceImpl {
             }));
         }
 
-        // Run on Rayon's thread pool so we don't block the Tokio executor.
         let points = inner.points;
         let result = tokio::task::spawn_blocking(move || {
             clustering::cluster(&points, zoom, radius_km)
@@ -43,7 +41,6 @@ impl GeoClusterService for ClusterServiceImpl {
         }))
     }
 
-    /// Return the nearest N CasePoints to a geographic coordinate.
     async fn nearby_points(
         &self,
         req: Request<NearbyRequest>,
@@ -56,10 +53,9 @@ impl GeoClusterService for ClusterServiceImpl {
 
         let limit     = (inner.limit as usize).clamp(1, 100);
         let radius_km = inner.radius_km.max(0.1);
-
-        let points = inner.points;
-        let lat    = inner.lat;
-        let lng    = inner.lng;
+        let points    = inner.points;
+        let lat       = inner.lat;
+        let lng       = inner.lng;
 
         let result = tokio::task::spawn_blocking(move || {
             clustering::nearby(lat, lng, radius_km, limit, &points)

@@ -1,0 +1,29 @@
+   Compiling either v1.16.0
+   Compiling itertools v0.12.1
+   Compiling rayon v1.12.0
+   Compiling prost-derive v0.12.6
+   Compiling prost v0.12.6
+   Compiling tonic v0.11.0
+   Compiling amber-clustering v0.1.0 (/home/angt-whiz/Documents/amber-alert/rust-clustering)
+error: environment variable `OUT_DIR` not defined at compile time
+  --> src/lib.rs:12:5
+   |
+12 |     tonic::include_proto!("clustering");
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: Cargo sets build script variables at run time. Use `std::env::var("OUT_DIR")` instead
+   = note: this error originates in the macro `env` which comes from the expansion of the macro `tonic::include_proto` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0432]: unresolved imports `crate::proto::CasePoint`, `crate::proto::Cluster`, `crate::proto::ClusterItem`, `crate::proto::cluster_item`
+  --> src/clustering.rs:18:20
+   |
+18 | use crate::proto::{CasePoint, Cluster, ClusterItem, cluster_item::Item};
+   |                    ^^^^^^^^^  ^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^^^^ could not find `cluster_item` in `proto`
+   |                    |          |        |
+   |                    |          |        no `ClusterItem` in `proto`
+   |                    |          no `Cluster` in `proto`
+   |                    no `CasePoint` in `proto`
+
+For more information about this error, try `rustc --explain E0432`.
+error: could not compile `amber-clustering` (lib) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...

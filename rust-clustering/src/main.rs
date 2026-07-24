@@ -1,10 +1,21 @@
-mod clustering;
+// main.rs — binary entry point.
+// The [lib] and [[bin]] in Cargo.toml share the same source tree.
+// Modules declared in lib.rs are accessible here via `amber_clustering::` but
+// the simplest approach in a single-crate setup is to just re-declare the
+// module path — Rust deduplicates the actual compilation unit.
+
 mod service;
 
-// Include the tonic-generated proto code.
+// Declare proto as a module sourced from src/proto.rs (same file lib.rs uses).
+// Cargo compiles each crate target separately so this is safe — there is no
+// "duplicate symbol" issue because bin and lib are distinct compilation units.
 pub mod proto {
-    tonic::include_proto!("clustering");
+    // Forward to the shared proto.rs file
+    include!(concat!(env!("OUT_DIR"), "/clustering.rs"));
 }
+
+// clustering.rs uses `crate::proto` — wire it up
+pub mod clustering;
 
 use proto::geo_cluster_service_server::GeoClusterServiceServer;
 use service::ClusterServiceImpl;
@@ -14,8 +25,6 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialise structured logging.
-    // Set RUST_LOG=amber_clustering=debug for verbose output.
     let subscriber = FmtSubscriber::builder()
         .with_env_filter(
             EnvFilter::try_from_default_env()

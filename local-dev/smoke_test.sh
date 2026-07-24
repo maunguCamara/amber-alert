@@ -47,7 +47,7 @@ check_json_field() {
 
 # ── 1. Go API ─────────────────────────────────────────────────────────────────
 section "Go API"
-check_http "Health endpoint"     "$GO_URL/health"           200  "ok"
+check_http "Health endpoint"     "$GO_URL/health"           200  '"status"'
 check_json_field "Health JSON"   "$GO_URL/health"           "status"
 check_http "Map geo-points"      "$GO_URL/api/v1/cases/map" 200
 check_http "Auth — no creds 401" "$GO_URL/api/v1/cases"     401

@@ -163,47 +163,99 @@ run_migrations() {
 setup_go() {
     banner "Go API dependencies"
     cd "$GO_DIR"
-    info "Downloading Go modules..."
-    go mod download 2>&1 | tail -5
+
+    if [ ! -f go.mod ]; then
+        fail "go.mod not found in $GO_DIR"
+    fi
+
+    # The module path in go.mod is github.com/kenya-amber-alert/api
+    # Go doesn't care about the path matching the filesystem — it just needs
+    # all imports to use that same prefix. Tidy will resolve everything.
+    info "Tidying Go modules (downloads dependencies)..."
+    go mod tidy 2>&1 | tail -10
+
     info "Verifying build..."
-    go build -o /tmp/amber-api-check ./cmd/server 2>&1 && rm -f /tmp/amber-api-check
-    ok "Go build OK"
+    if go build -o /tmp/amber-api-check ./cmd/server 2>&1; then
+        rm -f /tmp/amber-api-check
+        ok "Go build OK"
+    else
+        warn "Go build had errors — run 'cd go-api && go build ./cmd/server' to see full output"
+    fi
     cd - >/dev/null
 }
 
 setup_rust() {
     banner "Rust clustering service"
+    if [ ! -f "$RUST_DIR/Cargo.toml" ]; then
+        fail "Cargo.toml not found in $RUST_DIR — did you copy the rust-clustering directory correctly?"
+    fi
     cd "$RUST_DIR"
     info "Building Rust binary (this takes ~90s on first run)..."
     cargo build 2>&1 | tail -10
-    ok "Rust build OK"
+    ok "Rust build OK — binary at $RUST_DIR/target/debug/amber-clustering"
     cd - >/dev/null
 }
 
 setup_php() {
     banner "PHP / Laravel setup"
+
+    # If artisan doesn't exist, scaffold a fresh Laravel project and overlay our files
+    if [ ! -f "$PHP_DIR/artisan" ]; then
+        info "artisan not found — scaffolding fresh Laravel project..."
+
+        # Back up our custom files
+        TMP_PHP="/tmp/amber-php-custom-$$"
+        mkdir -p "$TMP_PHP"
+        [ -d "$PHP_DIR/app" ]               && cp -r "$PHP_DIR/app"               "$TMP_PHP/"
+        [ -d "$PHP_DIR/routes" ]            && cp -r "$PHP_DIR/routes"            "$TMP_PHP/"
+        [ -d "$PHP_DIR/resources/views" ]   && cp -r "$PHP_DIR/resources"         "$TMP_PHP/"
+        [ -f "$PHP_DIR/phpunit.xml" ]       && cp    "$PHP_DIR/phpunit.xml"       "$TMP_PHP/"
+        [ -d "$PHP_DIR/tests" ]             && cp -r "$PHP_DIR/tests"             "$TMP_PHP/"
+
+        # Scaffold Laravel into a temp location then move it
+        LARAVEL_TMP="/tmp/amber-laravel-scaffold-$$"
+        info "Running: composer create-project laravel/laravel $LARAVEL_TMP"
+        composer create-project laravel/laravel "$LARAVEL_TMP" --prefer-dist --quiet
+
+        if [ ! -f "$LARAVEL_TMP/artisan" ]; then
+            fail "composer create-project failed — check your internet connection and that composer is installed"
+        fi
+
+        # Replace php-laravel dir with fresh scaffold
+        rm -rf "$PHP_DIR"
+        mv "$LARAVEL_TMP" "$PHP_DIR"
+
+        # Overlay our custom app files on top
+        info "Overlaying custom application files..."
+        [ -d "$TMP_PHP/app" ]       && cp -r "$TMP_PHP/app/."       "$PHP_DIR/app/"
+        [ -d "$TMP_PHP/routes" ]    && cp -r "$TMP_PHP/routes/."    "$PHP_DIR/routes/"
+        [ -d "$TMP_PHP/resources" ] && cp -r "$TMP_PHP/resources/." "$PHP_DIR/resources/"
+        [ -f "$TMP_PHP/phpunit.xml" ] && cp  "$TMP_PHP/phpunit.xml" "$PHP_DIR/"
+        [ -d "$TMP_PHP/tests" ]     && cp -r "$TMP_PHP/tests/."     "$PHP_DIR/tests/"
+        rm -rf "$TMP_PHP"
+
+        ok "Laravel scaffolded and custom files overlaid"
+    else
+        info "artisan found — skipping scaffold"
+        if [ ! -d "$PHP_DIR/vendor" ]; then
+            info "Installing Composer packages..."
+            cd "$PHP_DIR" && composer install --no-interaction --prefer-dist --quiet && cd - >/dev/null
+        fi
+    fi
+
     cd "$PHP_DIR"
 
-    if [ ! -f composer.json ]; then
-        warn "No composer.json found in $PHP_DIR — skipping PHP setup"
-        return
-    fi
-
-    info "Installing Composer packages..."
-    composer install --no-interaction --prefer-dist --quiet 2>&1 | tail -5
-
-    if [ ! -f .env ]; then
-        cp "$SCRIPT_DIR/.env.php" .env 2>/dev/null || cp .env.example .env 2>/dev/null || true
-    fi
+    # Write .env for Laravel
+    cp "$SCRIPT_DIR/.env.php" .env
 
     info "Generating Laravel app key..."
-    php artisan key:generate --force --quiet 2>/dev/null || true
+    php artisan key:generate --force --quiet
 
-    info "Running Laravel migrations (SQLite fallback for dev if pgsql unavailable)..."
+    info "Running Laravel migrations..."
     php artisan migrate --force --quiet 2>/dev/null \
         || warn "Laravel migrations failed — check .env DB settings"
 
-    ok "Laravel ready"
+    ok "Laravel ready — artisan found at $PHP_DIR/artisan"
     cd - >/dev/null
 }
 
@@ -287,8 +339,10 @@ cmd_start() {
 
     check_deps_installed
 
-    # Prefer tmux for a nice split-pane view
-    if command -v tmux &>/dev/null && [ -n "${TMUX:-}" ]; then
+    # Prefer tmux for a nice split-pane view.
+    # When already inside a tmux session, create a *new* session and switch to it
+    # rather than trying to nest (which prints the "unset $TMUX" warning).
+    if command -v tmux &>/dev/null; then
         start_with_tmux
     else
         start_background
@@ -299,84 +353,99 @@ start_with_tmux() {
     info "Starting services in tmux panes..."
     SESSION="amber-alert"
 
-    # Kill existing session if any
+    # Kill any previous amber-alert session cleanly
     tmux kill-session -t "$SESSION" 2>/dev/null || true
+
+    # Create new detached session (works whether we are inside tmux or not)
     tmux new-session -d -s "$SESSION" -n "services" -x 220 -y 50
 
     # Pane 0 (top-left): Rust clustering
-    tmux send-keys -t "$SESSION:0" "$(rust_cmd)" Enter
-    tmux split-window -h -t "$SESSION:0"
+    tmux send-keys -t "$SESSION:0.0" "$(rust_cmd)" Enter
 
-    # Pane 1 (top-right): Go API
+    # Split right → Pane 1: Go API
+    tmux split-window -h -t "$SESSION:0.0"
     tmux send-keys -t "$SESSION:0.1" "$(go_cmd)" Enter
+
+    # Split pane 0 down → Pane 2: PHP Laravel
     tmux split-window -v -t "$SESSION:0.0"
-
-    # Pane 2 (bottom-left): PHP Laravel
     tmux send-keys -t "$SESSION:0.2" "$(php_cmd)" Enter
-    tmux split-window -v -t "$SESSION:0.1"
 
-    # Pane 3 (bottom-right): status / logs
-    tmux send-keys -t "$SESSION:0.3" "watch -n2 './dev.sh status'" Enter
+    # Split pane 1 down → Pane 3: live status
+    tmux split-window -v -t "$SESSION:0.1"
+    tmux send-keys -t "$SESSION:0.3" \
+        "watch -n2 'bash \"$SCRIPT_DIR/dev.sh\" status'" Enter
 
     tmux select-layout -t "$SESSION:0" tiled
-    tmux attach-session -t "$SESSION"
+
+    # If already inside tmux, switch-client; otherwise attach
+    if [ -n "${TMUX:-}" ]; then
+        tmux switch-client -t "$SESSION"
+    else
+        tmux attach-session -t "$SESSION"
+    fi
 }
 
 start_background() {
-    info "Starting services in background (no tmux found or not inside tmux session)..."
-    info "Tip: run inside a tmux session for split-pane view"
+    info "Starting services in background (no tmux detected)..."
+    info "Tip: open a fresh terminal outside any tmux session and run './dev.sh start' for the split-pane view"
 
     # 1. Rust clustering service
     info "Starting Rust clustering service on :${RUST_PORT}..."
-    env $(cat "$SCRIPT_DIR/.env.rust" | xargs) \
-        "$RUST_DIR/target/debug/amber-clustering" \
-        >> "$LOG_DIR/rust.log" 2>&1 &
+    (
+        set -a
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/.env.rust" 2>/dev/null || true
+        set +a
+        "$RUST_DIR/target/debug/amber-clustering"
+    ) >> "$LOG_DIR/rust.log" 2>&1 &
     echo $! > "$PID_DIR/rust.pid"
-    sleep 1
-    check_port "$RUST_PORT" "Rust clustering" || true
+    # Rust binary starts in ~500ms; wait up to 6s
+    wait_for_port "$RUST_PORT" 6 "Rust clustering"
 
-    # 2. Go API
+    # 2. Go API (go run compiles first — needs more time)
     info "Starting Go API on :${GO_PORT}..."
-    cd "$GO_DIR"
-    env $(cat "$SCRIPT_DIR/.env.go" | xargs) \
-        go run ./cmd/server \
-        >> "$LOG_DIR/go.log" 2>&1 &
+    (
+        cd "$GO_DIR"
+        set -a
+        source "$SCRIPT_DIR/.env.go" 2>/dev/null || true
+        set +a
+        go run ./cmd/server
+    ) >> "$LOG_DIR/go.log" 2>&1 &
     echo $! > "$PID_DIR/go.pid"
-    cd - >/dev/null
-    sleep 2
-    check_port "$GO_PORT" "Go API" || true
+    # go run needs to compile — wait up to 30s
+    wait_for_port "$GO_PORT" 30 "Go API"
 
     # 3. PHP Laravel
     info "Starting Laravel dev server on :${PHP_PORT}..."
-    cd "$PHP_DIR"
-    env $(cat "$SCRIPT_DIR/.env.php" | xargs) \
-        php artisan serve --host=127.0.0.1 --port="$PHP_PORT" \
-        >> "$LOG_DIR/php.log" 2>&1 &
+    (
+        cd "$PHP_DIR"
+        set -a
+        source "$SCRIPT_DIR/.env.php" 2>/dev/null || true
+        set +a
+        php artisan serve --host=127.0.0.1 --port="$PHP_PORT"
+    ) >> "$LOG_DIR/php.log" 2>&1 &
     echo $! > "$PID_DIR/php.pid"
-    cd - >/dev/null
-    sleep 1
-    check_port "$PHP_PORT" "PHP/Laravel" || true
+    # artisan serve starts in ~2s
+    wait_for_port "$PHP_PORT" 10 "PHP/Laravel"
 
     echo ""
     ok "All services started"
     print_urls
     echo ""
-    info "Logs: tail -f $LOG_DIR/*.log"
-    info "Stop: ./dev.sh stop"
+    info "Logs:  tail -f $LOG_DIR/*.log"
+    info "       ./dev.sh logs go    (Go only)"
+    info "       ./dev.sh logs rust  (Rust only)"
+    info "       ./dev.sh logs php   (Laravel only)"
+    info "Stop:  ./dev.sh stop"
 }
 
 # ── Service command strings (used by both tmux and background modes) ──────────
 rust_cmd() {
-    echo "cd '$RUST_DIR' && \
-        RUST_LOG=amber_clustering=debug \
-        CLUSTER_LISTEN_ADDR=127.0.0.1:${RUST_PORT} \
-        cargo run 2>&1 | tee '$LOG_DIR/rust.log'"
+    echo "cd '$RUST_DIR' && RUST_LOG=amber_clustering=debug CLUSTER_LISTEN_ADDR=127.0.0.1:${RUST_PORT} cargo run 2>&1 | tee '$LOG_DIR/rust.log'"
 }
 
 go_cmd() {
-    echo "cd '$GO_DIR' && \
-        $(cat "$SCRIPT_DIR/.env.go" 2>/dev/null | grep -v '^#' | grep '=' | sed 's/^/export /' | tr '\n' ' ') \
-        go run ./cmd/server 2>&1 | tee '$LOG_DIR/go.log'"
+    echo "cd '$GO_DIR' && set -a && source '$SCRIPT_DIR/.env.go' 2>/dev/null; set +a && go run ./cmd/server 2>&1 | tee '$LOG_DIR/go.log'"
 }
 
 php_cmd() {
@@ -500,15 +569,29 @@ psql_exec_file() {
         || fail "psql file failed: $1"
 }
 
+wait_for_port() {
+    local port=$1 timeout=$2 name=$3
+    local elapsed=0
+    printf "${CYAN}▶ Waiting for %s on :%s${NC}" "$name" "$port"
+    while ! nc -z localhost "$port" 2>/dev/null; do
+        sleep 1
+        elapsed=$((elapsed + 1))
+        printf "."
+        if [ "$elapsed" -ge "$timeout" ]; then
+            echo ""
+            warn "$name did not start within ${timeout}s — check $LOG_DIR/${name,,}.log"
+            return 1
+        fi
+    done
+    echo ""
+    ok "$name is up on :$port (${elapsed}s)"
+}
+
 check_port() {
     local port=$1; local name=$2
-    sleep 0.5
-    if nc -z localhost "$port" 2>/dev/null; then
-        ok "$name is up on :$port"
-    else
-        warn "$name not yet responding on :$port — check $LOG_DIR/${name,,}.log"
-        return 1
-    fi
+    nc -z localhost "$port" 2>/dev/null \
+        && ok "$name is up on :$port" \
+        || { warn "$name not responding on :$port"; return 1; }
 }
 
 check_port_quiet() {

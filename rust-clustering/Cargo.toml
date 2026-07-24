@@ -1,0 +1,32 @@
+[package]
+name    = "amber-clustering"
+version = "0.1.0"
+edition = "2021"
+
+# The binary — entry point for running the gRPC server
+[[bin]]
+name = "amber-clustering"
+path = "src/main.rs"
+
+# The library — lets integration tests import crate types
+[lib]
+name = "amber_clustering"
+path = "src/lib.rs"
+
+[dependencies]
+tonic        = { version = "0.11", features = ["transport"] }
+prost        = "0.12"
+tokio        = { version = "1.38", features = ["full"] }
+tokio-stream = "0.1"
+rayon        = "1.10"
+serde        = { version = "1.0", features = ["derive"] }
+serde_json   = "1.0"
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# geo / rstar not actually used in clustering.rs — remove to cut compile time
+# geo   = "0.28"
+# rstar = "0.11"
+
+[build-dependencies]
+tonic-build = "0.11"

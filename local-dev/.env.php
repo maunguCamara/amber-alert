@@ -1,0 +1,27 @@
+APP_NAME="Kenya Amber Alert Dev"
+APP_ENV=local
+APP_DEBUG=true
+APP_URL=http://localhost:8000
+
+DB_CONNECTION=pgsql
+DB_HOST=localhost
+DB_PORT=5432
+DB_DATABASE=amber_alert_dev
+DB_USERNAME=angt-whiz
+DB_PASSWORD=
+
+CACHE_DRIVER=redis
+SESSION_DRIVER=file
+QUEUE_CONNECTION=sync
+
+REDIS_HOST=127.0.0.1
+REDIS_PASSWORD=
+REDIS_PORT=6379
+
+AMBER_API_URL=http://localhost:8080
+AMBER_WS_URL=ws://localhost:8080/ws
+AMBER_API_TIMEOUT=10
+
+AT_API_KEY=sandbox_key
+AT_USERNAME=sandbox
+AT_SHORT_CODE=22384

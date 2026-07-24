@@ -1,0 +1,3 @@
+go: cannot find main module, but found .git/config in /home/angt-whiz/Documents/amber-alert
+	to create a module there, run:
+	cd .. && go mod init
