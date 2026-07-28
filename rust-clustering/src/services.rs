@@ -1,13 +1,17 @@
+// service.rs — gRPC service implementation.
+//
+// This file is only compiled as part of the binary target (main.rs).
+// It uses tonic traits and the tonic-generated proto types from
+// `crate::proto` (defined in main.rs via tonic::include_proto!).
+
 use tonic::{Request, Response, Status};
 
-// Import proto types from the crate root (whichever root is compiling us —
-// lib.rs for tests, main.rs for the binary — both define `mod proto`).
+use crate::clustering;
 use crate::proto::{
     geo_cluster_service_server::GeoClusterService,
     ClusterRequest, ClusterResponse,
     NearbyRequest, NearbyResponse,
 };
-use crate::clustering;
 
 pub struct ClusterServiceImpl;
 
