@@ -1,27 +1,30 @@
 // main.rs — binary entry point.
-// The [lib] and [[bin]] in Cargo.toml share the same source tree.
-// Modules declared in lib.rs are accessible here via `amber_clustering::` but
-// the simplest approach in a single-crate setup is to just re-declare the
-// module path — Rust deduplicates the actual compilation unit.
+//
+// The [[bin]] target uses the real tonic-generated proto types.
+// build.rs compiles proto/clustering.proto → OUT_DIR/clustering.rs
+// before this file is compiled, so include_proto! works here.
+//
+// Do NOT use tonic::include_proto! in lib.rs — the [lib] target
+// does not run build.rs and OUT_DIR is undefined there.
 
-mod service;
-
-// Declare proto as a module sourced from src/proto.rs (same file lib.rs uses).
-// Cargo compiles each crate target separately so this is safe — there is no
-// "duplicate symbol" issue because bin and lib are distinct compilation units.
-pub mod proto {
-    // Forward to the shared proto.rs file
-    include!(concat!(env!("OUT_DIR"), "/clustering.rs"));
-}
-
-// clustering.rs uses `crate::proto` — wire it up
-pub mod clustering;
-
-use proto::geo_cluster_service_server::GeoClusterServiceServer;
-use service::ClusterServiceImpl;
 use tonic::transport::Server;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
+
+// Pull in the tonic-generated code for the binary target only.
+pub mod proto {
+    tonic::include_proto!("clustering");
+}
+
+// clustering.rs references `crate::proto` — when compiled as part of
+// the binary crate root (this file), it sees the tonic-generated proto
+// module above.
+pub mod clustering;
+
+mod service;
+
+use proto::geo_cluster_service_server::GeoClusterServiceServer;
+use service::ClusterServiceImpl;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
