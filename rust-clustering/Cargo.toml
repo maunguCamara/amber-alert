@@ -3,12 +3,13 @@ name    = "amber-clustering"
 version = "0.1.0"
 edition = "2021"
 
-# The binary — entry point for running the gRPC server
+# Binary — the running gRPC server
 [[bin]]
 name = "amber-clustering"
 path = "src/main.rs"
 
-# The library — lets integration tests import crate types
+# Library — lets integration tests in tests/ import clustering logic
+# without depending on tonic or OUT_DIR
 [lib]
 name = "amber_clustering"
 path = "src/lib.rs"
@@ -23,10 +24,6 @@ serde        = { version = "1.0", features = ["derive"] }
 serde_json   = "1.0"
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# geo / rstar not actually used in clustering.rs — remove to cut compile time
-# geo   = "0.28"
-# rstar = "0.11"
 
 [build-dependencies]
 tonic-build = "0.11"
