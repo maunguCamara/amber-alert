@@ -1,26 +1,24 @@
-// main.rs — binary entry point.
+// main.rs — sole crate root (no [lib] target).
 //
-// The [[bin]] target uses the real tonic-generated proto types.
-// build.rs compiles proto/clustering.proto → OUT_DIR/clustering.rs
-// before this file is compiled, so include_proto! works here.
-//
-// Do NOT use tonic::include_proto! in lib.rs — the [lib] target
-// does not run build.rs and OUT_DIR is undefined there.
+// With only a [[bin]] target, `crate::` always refers to this file.
+// build.rs runs before compilation and writes the generated proto code
+// to OUT_DIR. tonic::include_proto! reads from OUT_DIR — this works
+// because Cargo sets OUT_DIR for every build script invocation before
+// any source file is compiled.
 
 use tonic::transport::Server;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-// Pull in the tonic-generated code for the binary target only.
-pub mod proto {
+// Proto types generated from proto/clustering.proto by build.rs.
+mod proto {
     tonic::include_proto!("clustering");
 }
 
-// clustering.rs references `crate::proto` — when compiled as part of
-// the binary crate root (this file), it sees the tonic-generated proto
-// module above.
-pub mod clustering;
+// Business logic — geo-clustering algorithm and Haversine distance.
+mod clustering;
 
+// gRPC service implementation (uses crate::proto and crate::clustering).
 mod service;
 
 use proto::geo_cluster_service_server::GeoClusterServiceServer;

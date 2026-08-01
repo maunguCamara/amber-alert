@@ -3,16 +3,16 @@ name    = "amber-clustering"
 version = "0.1.0"
 edition = "2021"
 
-# Binary — the running gRPC server
+# Single binary target — main.rs is the crate root.
+# No [lib] section: this eliminates the split-crate problem where
+# the binary's `crate::` resolves to lib.rs instead of main.rs.
+# Unit tests live inside src/ files under #[cfg(test)].
+# Integration tests in tests/ import via `use amber_clustering::...`
+# but since there is no lib, they link against the binary — see note
+# in tests/clustering_integration_test.rs for the workaround.
 [[bin]]
 name = "amber-clustering"
 path = "src/main.rs"
-
-# Library — lets integration tests in tests/ import clustering logic
-# without depending on tonic or OUT_DIR
-[lib]
-name = "amber_clustering"
-path = "src/lib.rs"
 
 [dependencies]
 tonic        = { version = "0.11", features = ["transport"] }
