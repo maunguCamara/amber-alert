@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kenya-amber-alert/api/internal/auth"
-	"github.com/kenya-amber-alert/api/internal/models"
+	"amberalert/internal/auth"
+	"amberalert/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -184,4 +184,4 @@ func splitToken(token string) []string {
 	}
 	parts = append(parts, token[start:])
 	return parts
-}
+}av

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kenya-amber-alert/api/internal/models"
-	"github.com/kenya-amber-alert/api/internal/repository"
-	"github.com/kenya-amber-alert/api/internal/websocket"
+	"amberalert/internal/models"
+	"amberalert/internal/repository"
+	"amberalert/internal/websocket"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )

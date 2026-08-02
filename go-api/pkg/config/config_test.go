@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/kenya-amber-alert/api/pkg/config"
+	"amberalert/pkg/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

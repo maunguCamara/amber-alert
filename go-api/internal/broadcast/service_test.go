@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kenya-amber-alert/api/internal/broadcast"
-	"github.com/kenya-amber-alert/api/internal/models"
-	"github.com/kenya-amber-alert/api/internal/repository"
+	"amberalert/internal/broadcast"
+	"amberalert/internal/models"
+	"amberalert/internal/repository"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"

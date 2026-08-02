@@ -8,9 +8,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/kenya-amber-alert/api/internal/auth"
-	"github.com/kenya-amber-alert/api/internal/models"
-	"github.com/kenya-amber-alert/api/pkg/middleware"
+	"amberalert/internal/auth"
+	"amberalert/internal/models"
+	"amberalert/pkg/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

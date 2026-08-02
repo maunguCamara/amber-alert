@@ -9,12 +9,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kenya-amber-alert/api/internal/api"
-	"github.com/kenya-amber-alert/api/internal/broadcast"
-	"github.com/kenya-amber-alert/api/internal/repository"
-	"github.com/kenya-amber-alert/api/internal/websocket"
-	"github.com/kenya-amber-alert/api/pkg/config"
-	"github.com/kenya-amber-alert/api/pkg/logger"
+	"amberalert/internal/api"
+	"amberalert/internal/broadcast"
+	"amberalert/internal/repository"
+	"amberalert/internal/websocket"
+	"amberalert/pkg/config"
+	"amberalert/pkg/logger"
 )
 
 func main() {

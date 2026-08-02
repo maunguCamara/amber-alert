@@ -4,9 +4,9 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/kenya-amber-alert/api/internal/auth"
-	"github.com/kenya-amber-alert/api/internal/models"
-	"github.com/kenya-amber-alert/api/internal/repository"
+	"amberalert/internal/auth"
+	"amberalert/internal/models"
+	"amberalert/internal/repository"
 	"go.uber.org/zap"
 )
 

@@ -8,11 +8,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/kenya-amber-alert/api/internal/broadcast"
-	"github.com/kenya-amber-alert/api/internal/models"
-	"github.com/kenya-amber-alert/api/internal/repository"
-	"github.com/kenya-amber-alert/api/pkg/config"
-	"github.com/kenya-amber-alert/api/pkg/middleware"
+	"amberalert/internal/broadcast"
+	"amberalert/internal/models"
+	"amberalert/internal/repository"
+	"amberalert/pkg/config"
+	"amberalert/pkg/middleware"
 	"go.uber.org/zap"
 )
 

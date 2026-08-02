@@ -7,7 +7,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/kenya-amber-alert/api/internal/models"
+	"amberalert/internal/models"
 	"golang.org/x/crypto/bcrypt"
 )
 

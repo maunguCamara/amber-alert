@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/kenya-amber-alert/api/internal/models"
+	"amberalert/internal/models"
 )
 
 // Pool wraps pgxpool and is shared across all repositories.

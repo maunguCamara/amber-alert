@@ -8,8 +8,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/kenya-amber-alert/api/internal/auth"
-	"github.com/kenya-amber-alert/api/internal/models"
+	"amberalert/internal/auth"
+	"amberalert/internal/models"
 	"go.uber.org/zap"
 )
 

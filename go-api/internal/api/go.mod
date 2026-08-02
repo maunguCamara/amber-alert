@@ -1,4 +1,4 @@
-module github.com/kenya-amber-alert/api
+module amberalert
 
 go 1.22
 
