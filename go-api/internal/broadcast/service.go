@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"amberalert/internal/models"
-	"amberalert/internal/repository"
-	"amberalert/internal/websocket"
+	"localhost/amberalert/internal/models"
+	"localhost/amberalert/internal/repository"
+	"localhost/amberalert/internal/websocket"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )

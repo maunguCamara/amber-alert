@@ -3,8 +3,8 @@ package repository_test
 import (
 	"testing"
 
-	"amberalert/internal/models"
-	"amberalert/internal/repository"
+	"localhost/amberalert/internal/models"
+	"localhost/amberalert/internal/repository"
 	"github.com/stretchr/testify/assert"
 )
 

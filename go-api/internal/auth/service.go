@@ -7,7 +7,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"amberalert/internal/models"
+	"localhost/amberalert/internal/models"
 	"golang.org/x/crypto/bcrypt"
 )
 

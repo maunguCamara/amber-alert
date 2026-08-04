@@ -9,12 +9,12 @@ import (
 	"syscall"
 	"time"
 
-	"amberalert/internal/api"
-	"amberalert/internal/broadcast"
-	"amberalert/internal/repository"
-	"amberalert/internal/websocket"
-	"amberalert/pkg/config"
-	"amberalert/pkg/logger"
+	"localhost/amberalert/internal/api"
+	"localhost/amberalert/internal/broadcast"
+	"localhost/amberalert/internal/repository"
+	"localhost/amberalert/internal/websocket"
+	"localhost/amberalert/pkg/config"
+	"localhost/amberalert/pkg/logger"
 )
 
 func main() {

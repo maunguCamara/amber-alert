@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"amberalert/internal/broadcast"
-	"amberalert/internal/models"
-	"amberalert/internal/repository"
+	"localhost/amberalert/internal/broadcast"
+	"localhost/amberalert/internal/models"
+	"localhost/amberalert/internal/repository"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"

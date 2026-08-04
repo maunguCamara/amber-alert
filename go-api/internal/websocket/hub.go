@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"amberalert/internal/models"
+	"localhost/amberalert/internal/models"
 	"go.uber.org/zap"
 )
 

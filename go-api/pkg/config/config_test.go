@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"amberalert/pkg/config"
+	"localhost/amberalert/pkg/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -4,8 +4,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"amberalert/internal/repository"
-	"amberalert/internal/websocket"
+	"localhost/amberalert/internal/repository"
+	"localhost/amberalert/internal/websocket"
 	"go.uber.org/zap"
 )
 

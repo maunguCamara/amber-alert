@@ -9,8 +9,8 @@ import (
 	"time"
 
 	gorillaws "github.com/gorilla/websocket"
-	"amberalert/internal/models"
-	"amberalert/internal/websocket"
+	"localhost/amberalert/internal/models"
+	"localhost/amberalert/internal/websocket"
 	"go.uber.org/zap"
 
 	"github.com/stretchr/testify/assert"

@@ -8,11 +8,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"amberalert/internal/broadcast"
-	"amberalert/internal/models"
-	"amberalert/internal/repository"
-	"amberalert/pkg/config"
-	"amberalert/pkg/middleware"
+	"localhost/amberalert/internal/broadcast"
+	"localhost/amberalert/internal/models"
+	"localhost/amberalert/internal/repository"
+	"localhost/amberalert/pkg/config"
+	"localhost/amberalert/pkg/middleware"
 	"go.uber.org/zap"
 )
 

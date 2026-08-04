@@ -8,9 +8,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"amberalert/internal/auth"
-	"amberalert/internal/models"
-	"amberalert/pkg/middleware"
+	"localhost/amberalert/internal/auth"
+	"localhost/amberalert/internal/models"
+	"localhost/amberalert/pkg/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

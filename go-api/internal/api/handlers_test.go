@@ -10,8 +10,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"amberalert/internal/auth"
-	"amberalert/internal/models"
+	"localhost/amberalert/internal/auth"
+	"localhost/amberalert/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

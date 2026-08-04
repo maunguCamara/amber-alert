@@ -4,9 +4,9 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"amberalert/internal/auth"
-	"amberalert/internal/models"
-	"amberalert/internal/repository"
+	"localhost/amberalert/internal/auth"
+	"localhost/amberalert/internal/models"
+	"localhost/amberalert/internal/repository"
 	"go.uber.org/zap"
 )
 
