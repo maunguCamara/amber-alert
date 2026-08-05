@@ -1,8 +1,8 @@
 AMBER_ENVIRONMENT=development
 AMBER_PORT=8080
-AMBER_DATABASE_URL=postgres://angt-whiz@localhost:5432/amber_alert_dev?sslmode=disable
-AMBER_REDIS_URL=redis://127.0.0.1:6379/0
-AMBER_JWT_SECRET=dev-secret-key-change-in-production-32
+AMBER_DATABASE_URL="postgres://angt-whiz:amber123@localhost:5432/amber_alert_dev?sslmode=disable"
+AMBER_REDIS_URL="redis://127.0.0.1:6379/0"
+AMBER_JWT_SECRET="dev-secret-key-32-chars-minimum!!"
 AMBER_JWT_ACCESS_TOKEN_TTL=15m
 AMBER_JWT_REFRESH_TOKEN_TTL=168h
 # Local filesystem storage (no MinIO needed for dev)
