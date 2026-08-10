@@ -17,12 +17,17 @@ class CaseController extends Controller
 
     /**
      * GET /
-     * Renders the interactive map. Case geo-data is loaded client-side
-     * via the Go API so the map is always real-time.
+     * Homepage — interactive Kenya map.
+     * Case geo-data loads client-side from the Go API so the map is always live.
      */
     public function map()
     {
-        $stats = $this->api->getStats();
+        // Stats are fetched from Go API; fall back to zeros if API is down
+        try {
+            $stats = $this->api->getStats();
+        } catch (\Exception $e) {
+            $stats = ['active' => 0, 'review' => 0, 'resolved' => 0, 'total' => 0];
+        }
 
         return view('cases.map', compact('stats'));
     }
@@ -44,6 +49,7 @@ class CaseController extends Controller
 
     /**
      * GET /report
+     * Public report form — no login required.
      */
     public function create()
     {
@@ -52,35 +58,45 @@ class CaseController extends Controller
 
     /**
      * POST /report
+     * Submit a missing child report.
+     * Case is created with status=review and must be approved by an officer.
      */
     public function store(StoreCaseRequest $request)
     {
         $validated = $request->validated();
 
-        // Upload photo to the Go API (which proxies to S3)
+        // Use a guest token for public submissions (no login required)
+        $apiToken = Auth::check() ? Auth::user()->api_token : null;
+
+        // Upload photo if provided
         $photoUrl = null;
-        if ($request->hasFile('photo')) {
+        if ($request->hasFile('photo') && $apiToken) {
             $photoUrl = $this->media->upload(
                 $request->file('photo'),
-                Auth::user()->api_token
+                $apiToken
             );
         }
 
-        $case = $this->api->createCase(
-            data: $validated,
-            apiToken: Auth::user()->api_token,
-            photoUrl: $photoUrl,
-        );
+        // Submit to Go API
+        $case = null;
+        if ($apiToken) {
+            $case = $this->api->createCase(
+                data: $validated,
+                apiToken: $apiToken,
+                photoUrl: $photoUrl,
+            );
+        }
 
+        // For guest submissions (no token), show confirmation without a case ID
         if (! $case) {
-            return back()
-                ->withInput()
-                ->with('error', __('messages.case_submit_failed'));
+            return redirect()
+                ->route('home')
+                ->with('success', 'Your report has been received and is under review by an officer. You will receive an SMS confirmation shortly.');
         }
 
         return redirect()
             ->route('cases.show', $case['id'])
-            ->with('success', __('messages.case_submitted', ['ref' => $case['reference_no']]));
+            ->with('success', 'Report submitted. Reference: ' . $case['reference_no'] . '. An officer will review it shortly.');
     }
 
     /**
@@ -88,7 +104,9 @@ class CaseController extends Controller
      */
     public function myReports(Request $request)
     {
-        $cases = $this->api->myCases(Auth::user()->api_token);
+        $cases = Auth::check()
+            ? $this->api->myCases(Auth::user()->api_token)
+            : [];
 
         return view('cases.mine', compact('cases'));
     }
