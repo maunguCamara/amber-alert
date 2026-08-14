@@ -1,83 +1,125 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Http\Controllers\Admin;
 
+use App\Contracts\AlertApiContract;
+use App\Enums\CaseStatus;
+use App\Exceptions\ApiException;
+use App\Exceptions\ApiNetworkException;
+use App\Exceptions\ApiNotFoundException;
+use App\Exceptions\ApiUnauthorizedException;
 use App\Http\Controllers\Controller;
-use App\Services\AmberApiClient;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\View\View;
 
-class AdminCaseController extends Controller
+final class AdminCaseController extends Controller
 {
-    public function __construct(private readonly AmberApiClient $api) {}
+    public function __construct(private readonly AlertApiContract $api) {}
 
-    /**
-     * GET /dashboard
-     * Officer / admin case queue.
-     */
-    public function index()
+    public function index(): View
     {
-        $token = Auth::user()->api_token ?? '';
+        $token = $this->requireToken();
 
-        // Fetch cases under review (pending officer approval)
-        $pendingCases = $this->api->listAllCases($token, ['status' => 'review']) ?? [];
+        // Catch independently so one failure doesn't blank the whole dashboard
+        try {
+            $pendingCases = $this->api->getGeoPoints(limit: 100, status: CaseStatus::Review->value);
+        } catch (ApiException) {
+            $pendingCases = [];
+        }
 
-        // Fetch active cases for this officer's county
-        $activeCases = $this->api->listAllCases($token, ['status' => 'active']) ?? [];
+        try {
+            $activeCases = $this->api->getGeoPoints(limit: 200, status: CaseStatus::Active->value);
+        } catch (ApiException) {
+            $activeCases = [];
+        }
 
-        $stats = $this->api->getStats();
+        $stats = $this->api->getStats(); // never throws
 
         return view('admin.dashboard', compact('pendingCases', 'activeCases', 'stats'));
     }
 
-    /**
-     * GET /dashboard/cases/{id}
-     */
-    public function show(string $id)
+    public function show(string $id): View|RedirectResponse
     {
-        $case = $this->api->getCase($id);
-        if (! $case) abort(404);
-        return view('admin.case_detail', compact('case'));
+        try {
+            $case = $this->api->getCase($id);
+        } catch (ApiNotFoundException) {
+            abort(404);
+        } catch (ApiNetworkException) {
+            return redirect()->route('dashboard.index')
+                ->with('error', 'Could not load case — service temporarily unavailable.');
+        }
+
+        return view('admin.case_detail', ['case' => $case]);
     }
 
-    /**
-     * PATCH /dashboard/cases/{id}/status
-     * Officer approves, rejects, or resolves a case.
-     */
-    public function updateStatus(Request $request, string $id)
+    public function updateStatus(Request $request, string $id): RedirectResponse
     {
-        $request->validate([
-            'status'     => 'required|in:active,review,resolved,closed',
-            'resolution' => 'nullable|string|max:500',
+        $validated = $request->validate([
+            'status'     => ['required', 'string', 'in:active,review,resolved,closed'],
+            'resolution' => ['nullable', 'string', 'max:500'],
         ]);
 
-        $success = $this->api->updateStatus(
-            id:         $id,
-            status:     $request->status,
-            resolution: $request->resolution ?? '',
-            apiToken:   Auth::user()->api_token ?? '',
-        );
+        $newStatus = CaseStatus::from($validated['status']);
 
-        $label = match($request->status) {
-            'active'   => 'approved and is now live on the map',
-            'resolved' => 'marked as resolved',
-            'closed'   => 'closed',
-            default    => 'updated',
-        };
+        // Fetch current case to enforce valid transition
+        try {
+            $case = $this->api->getCase($id);
+        } catch (ApiNotFoundException) {
+            return back()->with('error', 'Case not found.');
+        }
 
-        return back()->with(
-            $success ? 'success' : 'error',
-            $success ? "Case has been {$label}." : 'Failed to update case. Please try again.'
-        );
+        if (! $case->status->canTransitionTo($newStatus)) {
+            return back()->with(
+                'error',
+                "Cannot change status from {$case->status->label()} to {$newStatus->label()}."
+            );
+        }
+
+        try {
+            $this->api->updateStatus(
+                id:         $id,
+                status:     $newStatus->value,
+                resolution: (string) ($validated['resolution'] ?? ''),
+                apiToken:   $this->requireToken(),
+            );
+        } catch (ApiUnauthorizedException) {
+            return back()->with('error', 'Your session has expired. Please log in again.');
+        } catch (ApiException $e) {
+            return back()->with('error', 'Could not update case: ' . $e->getMessage());
+        }
+
+        return back()->with('success', "Case has been {$newStatus->label()}.");
+    }
+
+    public function broadcast(string $id): RedirectResponse
+    {
+        try {
+            $this->api->broadcastCase($id, $this->requireToken());
+        } catch (ApiUnauthorizedException) {
+            return back()->with('error', 'Your session has expired. Please log in again.');
+        } catch (ApiException $e) {
+            return back()->with('error', 'SMS broadcast failed: ' . $e->getMessage());
+        }
+
+        return back()->with('success', 'SMS broadcast queued for this county.');
     }
 
     /**
-     * POST /dashboard/cases/{id}/broadcast
-     * Trigger manual SMS blast for a case.
+     * Retrieve the authenticated user's API token.
+     * Throws if the user is not authenticated or the token is empty.
+     *
+     * @throws ApiUnauthorizedException
      */
-    public function broadcast(string $id)
+    private function requireToken(): string
     {
-        $this->api->broadcastCase($id, Auth::user()->api_token ?? '');
-        return back()->with('success', 'SMS broadcast has been queued.');
+        $token = Auth::user()?->api_token ?? '';
+        if (trim($token) === '') {
+            throw new ApiUnauthorizedException('No API token — please log in again.', 401);
+        }
+        return $token;
     }
 }
