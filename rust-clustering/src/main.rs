@@ -1,28 +1,27 @@
-// main.rs — sole crate root (no [lib] target).
+// main.rs — binary entry point.
 //
-// With only a [[bin]] target, `crate::` always refers to this file.
-// build.rs runs before compilation and writes the generated proto code
-// to OUT_DIR. tonic::include_proto! reads from OUT_DIR — this works
-// because Cargo sets OUT_DIR for every build script invocation before
-// any source file is compiled.
+// Key hardening applied:
+//   T-22: MaxRecvMsgSize set to 10 MB — prevents gRPC message bomb
+//   T-32: NaN/Inf coordinate validation before clustering
 
 use tonic::transport::Server;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-// Proto types generated from proto/clustering.proto by build.rs.
 mod proto {
     tonic::include_proto!("clustering");
 }
 
-// Business logic — geo-clustering algorithm and Haversine distance.
 mod clustering;
-
-// gRPC service implementation (uses crate::proto and crate::clustering).
 mod service;
 
 use proto::geo_cluster_service_server::GeoClusterServiceServer;
 use service::ClusterServiceImpl;
+
+// 10 MB — a realistic upper bound for a single clustering request
+// covering all 47 Kenyan counties with many cases.
+// Exceeding this returns gRPC RESOURCE_EXHAUSTED without crashing (T-22).
+const MAX_RECV_MSG_SIZE: usize = 10 * 1024 * 1024;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -43,6 +42,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Amber Alert Clustering Service listening on {}", addr);
 
     Server::builder()
+        // FIX T-22: cap incoming message size — rejects gRPC bombs
+        .max_recv_message_size(MAX_RECV_MSG_SIZE)
+        // Limit outgoing size symmetrically
+        .max_send_message_size(MAX_RECV_MSG_SIZE)
         .add_service(GeoClusterServiceServer::new(ClusterServiceImpl))
         .serve(addr)
         .await?;

@@ -1,12 +1,17 @@
 package models
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-// ─── Enums ───────────────────────────────────────────────────────────────────
+// ── Enums ─────────────────────────────────────────────────────────────────────
+//
+// All enum types are defined as typed strings with an explicit set of valid
+// values. IsValid() is called at the API boundary so unknown values are
+// rejected early rather than stored silently.
 
 type CaseStatus string
 
@@ -17,6 +22,37 @@ const (
 	CaseStatusClosed   CaseStatus = "closed"
 )
 
+var validCaseStatuses = map[CaseStatus]bool{
+	CaseStatusActive:   true,
+	CaseStatusReview:   true,
+	CaseStatusResolved: true,
+	CaseStatusClosed:   true,
+}
+
+func (s CaseStatus) IsValid() bool { return validCaseStatuses[s] }
+
+// CanTransitionTo enforces the case state machine.
+// Officers cannot re-open a resolved case or set an invalid transition.
+func (s CaseStatus) CanTransitionTo(next CaseStatus) bool {
+	switch s {
+	case CaseStatusReview:
+		return next == CaseStatusActive || next == CaseStatusClosed
+	case CaseStatusActive:
+		return next == CaseStatusResolved || next == CaseStatusClosed
+	default:
+		return false // resolved and closed are terminal
+	}
+}
+
+func (s CaseStatus) Validate() error {
+	if !s.IsValid() {
+		return fmt.Errorf("invalid case status %q: must be one of active, review, resolved, closed", s)
+	}
+	return nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 type Gender string
 
 const (
@@ -25,14 +61,46 @@ const (
 	GenderUnknown Gender = "unknown"
 )
 
+var validGenders = map[Gender]bool{
+	GenderMale:    true,
+	GenderFemale:  true,
+	GenderUnknown: true,
+}
+
+func (g Gender) IsValid() bool { return validGenders[g] }
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 type UserRole string
 
 const (
-	RolePublic   UserRole = "public"    // general member of public
-	RoleOfficer  UserRole = "officer"   // police / county officer
-	RoleAdmin    UserRole = "admin"     // national admin
+	RolePublic     UserRole = "public"
+	RoleOfficer    UserRole = "officer"
+	RoleAdmin      UserRole = "admin"
 	RoleSuperAdmin UserRole = "superadmin"
 )
+
+var validUserRoles = map[UserRole]bool{
+	RolePublic:     true,
+	RoleOfficer:    true,
+	RoleAdmin:      true,
+	RoleSuperAdmin: true,
+}
+
+func (r UserRole) IsValid() bool { return validUserRoles[r] }
+
+// IsAtLeast returns true if this role has at least the same privilege as other.
+func (r UserRole) IsAtLeast(other UserRole) bool {
+	rank := map[UserRole]int{
+		RolePublic:     0,
+		RoleOfficer:    1,
+		RoleAdmin:      2,
+		RoleSuperAdmin: 3,
+	}
+	return rank[r] >= rank[other]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 type BroadcastChannel string
 
@@ -43,72 +111,88 @@ const (
 	ChannelWebPush  BroadcastChannel = "webpush"
 )
 
-// ─── Case ────────────────────────────────────────────────────────────────────
+// ── Case ─────────────────────────────────────────────────────────────────────
 
-// Case represents a missing child alert.
 type Case struct {
 	ID          uuid.UUID  `db:"id"           json:"id"`
-	ReferenceNo string     `db:"reference_no" json:"reference_no"` // e.g. KE-2024-00042
+	ReferenceNo string     `db:"reference_no" json:"reference_no"`
 
-	// Child details
 	ChildName   string  `db:"child_name"   json:"child_name"`
 	Age         int     `db:"age"          json:"age"`
 	Gender      Gender  `db:"gender"       json:"gender"`
-	HeightCM    float64 `db:"height_cm"    json:"height_cm"`
+	HeightCM    float64 `db:"height_cm"    json:"height_cm,omitempty"`
 	WeightKG    float64 `db:"weight_kg"    json:"weight_kg,omitempty"`
 	Complexion  string  `db:"complexion"   json:"complexion,omitempty"`
 	Clothing    string  `db:"clothing"     json:"clothing"`
-	Distinctive string  `db:"distinctive"  json:"distinctive,omitempty"` // scars, birthmarks
-	Languages   []string `db:"languages"   json:"languages,omitempty"`    // ["Swahili","Luo"]
+	Distinctive string  `db:"distinctive"  json:"distinctive,omitempty"`
+	Languages   []string `db:"languages"   json:"languages,omitempty"`
 
-	// Location (PostGIS)
-	LastSeenArea     string  `db:"last_seen_area"     json:"last_seen_area"`
-	County           string  `db:"county"             json:"county"`
-	SubCounty        string  `db:"sub_county"         json:"sub_county,omitempty"`
-	LastSeenLat      float64 `db:"last_seen_lat"      json:"last_seen_lat"`
-	LastSeenLng      float64 `db:"last_seen_lng"      json:"last_seen_lng"`
+	LastSeenArea string  `db:"last_seen_area" json:"last_seen_area"`
+	County       string  `db:"county"         json:"county"`
+	SubCounty    string  `db:"sub_county"     json:"sub_county,omitempty"`
+	LastSeenLat  float64 `db:"last_seen_lat"  json:"last_seen_lat"`
+	LastSeenLng  float64 `db:"last_seen_lng"  json:"last_seen_lng"`
 
-	// Circumstances
-	Description     string    `db:"description"      json:"description"`
-	MissingSince    time.Time `db:"missing_since"    json:"missing_since"`
-	CircumstanceType string   `db:"circumstance_type" json:"circumstance_type"` // wandered/abducted/unknown
+	Description      string    `db:"description"       json:"description"`
+	MissingSince     time.Time `db:"missing_since"     json:"missing_since"`
+	CircumstanceType string    `db:"circumstance_type" json:"circumstance_type"`
 
-	// Status
-	Status      CaseStatus `db:"status"       json:"status"`
-	ResolvedAt  *time.Time `db:"resolved_at"  json:"resolved_at,omitempty"`
-	Resolution  string     `db:"resolution"   json:"resolution,omitempty"`
+	Status     CaseStatus `db:"status"      json:"status"`
+	ResolvedAt *time.Time `db:"resolved_at" json:"resolved_at,omitempty"`
+	Resolution string     `db:"resolution"  json:"resolution,omitempty"`
 
-	// Reporter
 	ReporterID   uuid.UUID `db:"reporter_id"   json:"reporter_id"`
-	ReporterType string    `db:"reporter_type" json:"reporter_type"` // public/police/school
+	ReporterType string    `db:"reporter_type" json:"reporter_type"`
 	ContactPhone string    `db:"contact_phone" json:"contact_phone,omitempty"`
 
-	// Media
 	Photos []Media `db:"-" json:"photos,omitempty"`
 
-	// Audit
 	CreatedAt time.Time  `db:"created_at" json:"created_at"`
 	UpdatedAt time.Time  `db:"updated_at" json:"updated_at"`
 	CreatedBy uuid.UUID  `db:"created_by" json:"created_by"`
 	UpdatedBy *uuid.UUID `db:"updated_by" json:"updated_by,omitempty"`
 }
 
-// CaseGeoPoint is the lightweight struct returned for map rendering.
-type CaseGeoPoint struct {
-	ID          uuid.UUID  `json:"id"`
-	ReferenceNo string     `json:"reference_no"`
-	ChildName   string     `json:"child_name"`
-	Age         int        `json:"age"`
-	Gender      Gender     `json:"gender"`
-	Status      CaseStatus `json:"status"`
-	County      string     `json:"county"`
-	Lat         float64    `json:"lat"`
-	Lng         float64    `json:"lng"`
-	MissingSince time.Time `json:"missing_since"`
-	ThumbnailURL string    `json:"thumbnail_url,omitempty"`
+// Validate checks business rules that cannot be expressed as struct tags.
+func (c *Case) Validate() error {
+	if err := c.Status.Validate(); err != nil {
+		return err
+	}
+	if !c.Gender.IsValid() {
+		return fmt.Errorf("invalid gender %q", c.Gender)
+	}
+	if c.Age < 0 || c.Age > 17 {
+		return fmt.Errorf("age %d is out of range (0–17)", c.Age)
+	}
+	if c.LastSeenLat < -5.0 || c.LastSeenLat > 5.0 {
+		return fmt.Errorf("lat %.4f is outside Kenya bounds", c.LastSeenLat)
+	}
+	if c.LastSeenLng < 34.0 || c.LastSeenLng > 42.0 {
+		return fmt.Errorf("lng %.4f is outside Kenya bounds", c.LastSeenLng)
+	}
+	if c.MissingSince.IsZero() {
+		return fmt.Errorf("missing_since must not be zero")
+	}
+	return nil
 }
 
-// ─── Media ───────────────────────────────────────────────────────────────────
+// ── CaseGeoPoint — lightweight map pin ───────────────────────────────────────
+
+type CaseGeoPoint struct {
+	ID           uuid.UUID  `json:"id"`
+	ReferenceNo  string     `json:"reference_no"`
+	ChildName    string     `json:"child_name"`
+	Age          int        `json:"age"`
+	Gender       Gender     `json:"gender"`
+	Status       CaseStatus `json:"status"`
+	County       string     `json:"county"`
+	Lat          float64    `json:"lat"`
+	Lng          float64    `json:"lng"`
+	MissingSince time.Time  `json:"missing_since"`
+	ThumbnailURL string     `json:"thumbnail_url,omitempty"`
+}
+
+// ── Media ─────────────────────────────────────────────────────────────────────
 
 type Media struct {
 	ID        uuid.UUID `db:"id"         json:"id"`
@@ -121,39 +205,39 @@ type Media struct {
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
-// ─── User ────────────────────────────────────────────────────────────────────
+// ── User ──────────────────────────────────────────────────────────────────────
 
 type User struct {
-	ID           uuid.UUID `db:"id"            json:"id"`
-	Email        string    `db:"email"         json:"email"`
-	Phone        string    `db:"phone"         json:"phone,omitempty"`
-	FullName     string    `db:"full_name"     json:"full_name"`
-	Role         UserRole  `db:"role"          json:"role"`
-	County       string    `db:"county"        json:"county,omitempty"` // assigned county for officers
-	PasswordHash string    `db:"password_hash" json:"-"`
-	IsVerified   bool      `db:"is_verified"   json:"is_verified"`
-	IsActive     bool      `db:"is_active"     json:"is_active"`
+	ID           uuid.UUID  `db:"id"            json:"id"`
+	Email        string     `db:"email"         json:"email"`
+	Phone        string     `db:"phone"         json:"phone,omitempty"`
+	FullName     string     `db:"full_name"     json:"full_name"`
+	Role         UserRole   `db:"role"          json:"role"`
+	County       string     `db:"county"        json:"county,omitempty"`
+	PasswordHash string     `db:"password_hash" json:"-"`
+	IsVerified   bool       `db:"is_verified"   json:"is_verified"`
+	IsActive     bool       `db:"is_active"     json:"is_active"`
 	LastLoginAt  *time.Time `db:"last_login_at" json:"last_login_at,omitempty"`
-	CreatedAt    time.Time `db:"created_at"    json:"created_at"`
-	UpdatedAt    time.Time `db:"updated_at"    json:"updated_at"`
+	CreatedAt    time.Time  `db:"created_at"    json:"created_at"`
+	UpdatedAt    time.Time  `db:"updated_at"    json:"updated_at"`
 }
 
-// ─── Broadcast record ────────────────────────────────────────────────────────
+// ── Broadcast record ──────────────────────────────────────────────────────────
 
 type BroadcastRecord struct {
 	ID          uuid.UUID        `db:"id"           json:"id"`
 	CaseID      uuid.UUID        `db:"case_id"      json:"case_id"`
 	Channel     BroadcastChannel `db:"channel"      json:"channel"`
-	Recipient   string           `db:"recipient"    json:"recipient"`  // phone or email
-	MessageID   string           `db:"message_id"   json:"message_id"` // provider message ID
-	Status      string           `db:"status"       json:"status"`     // sent/delivered/failed
+	Recipient   string           `db:"recipient"    json:"recipient"`
+	MessageID   string           `db:"message_id"   json:"message_id"`
+	Status      string           `db:"status"       json:"status"`
 	SentAt      time.Time        `db:"sent_at"      json:"sent_at"`
 	DeliveredAt *time.Time       `db:"delivered_at" json:"delivered_at,omitempty"`
 }
 
-// ─── WebSocket event ─────────────────────────────────────────────────────────
+// ── WebSocket event ───────────────────────────────────────────────────────────
 
 type WSEvent struct {
-	Type    string `json:"type"`    // case.new | case.updated | case.resolved
+	Type    string `json:"type"`
 	Payload any    `json:"payload"`
 }

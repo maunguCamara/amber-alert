@@ -2,16 +2,18 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"localhost/amberalert/internal/models"
+	"example.com/amberalert/internal/models"
 )
 
-// Pool wraps pgxpool and is shared across all repositories.
+// ── Pool ─────────────────────────────────────────────────────────────────────
+
 func NewPool(dsn string) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
@@ -26,27 +28,25 @@ func NewPool(dsn string) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create pool: %w", err)
 	}
-
 	if err := pool.Ping(context.Background()); err != nil {
 		return nil, fmt.Errorf("ping db: %w", err)
 	}
 	return pool, nil
 }
 
-// ─── Case Repository ─────────────────────────────────────────────────────────
+// ── Case Repository ───────────────────────────────────────────────────────────
 
 type CaseRepo struct{ db *pgxpool.Pool }
 
 func NewCaseRepo(db *pgxpool.Pool) *CaseRepo { return &CaseRepo{db: db} }
 
-// Create inserts a new case and returns it with generated fields populated.
 func (r *CaseRepo) Create(ctx context.Context, c *models.Case) error {
-	query := `
+	const query = `
 	INSERT INTO cases (
 		id, reference_no, child_name, age, gender, height_cm, weight_kg,
 		complexion, clothing, distinctive, languages,
 		last_seen_area, county, sub_county,
-		location, -- PostGIS geography(POINT,4326)
+		location,
 		description, missing_since, circumstance_type,
 		status, reporter_id, reporter_type, contact_phone,
 		created_by, created_at, updated_at
@@ -74,9 +74,8 @@ func (r *CaseRepo) Create(ctx context.Context, c *models.Case) error {
 	).Scan(&c.CreatedAt, &c.UpdatedAt, &c.ReferenceNo)
 }
 
-// GetByID returns a full case record including attached media.
 func (r *CaseRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Case, error) {
-	query := `
+	const query = `
 	SELECT
 		c.id, c.reference_no, c.child_name, c.age, c.gender,
 		c.height_cm, c.weight_kg, c.complexion, c.clothing, c.distinctive, c.languages,
@@ -102,13 +101,13 @@ func (r *CaseRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Case, err
 		&c.CreatedAt, &c.UpdatedAt, &c.CreatedBy,
 	)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("get case: %w", err)
 	}
 
-	// Attach photos
+	// Attach photos — log but do not fail if media fetch errors
 	photos, err := r.mediaRepo().ByCaseID(ctx, id)
 	if err == nil {
 		c.Photos = photos
@@ -116,8 +115,28 @@ func (r *CaseRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Case, err
 	return &c, nil
 }
 
-// ListGeoPoints returns lightweight records for the map UI.
+// ListGeoPoints returns lightweight records for map rendering.
+//
+// FIX T-04 / T-29: status and county are passed as parameterised arguments
+// ($3 and $4) instead of being interpolated into the query string with
+// fmt.Sprintf. This eliminates the SQL injection vulnerability.
 func (r *CaseRepo) ListGeoPoints(ctx context.Context, filter CaseFilter) ([]models.CaseGeoPoint, error) {
+	// Build the argument list. $1=limit, $2=offset are always present.
+	// $3=status and $4=county are added conditionally.
+	args := []any{filter.Limit, filter.Offset}
+
+	statusClause := ""
+	if filter.Status != nil {
+		args = append(args, string(*filter.Status))
+		statusClause = fmt.Sprintf(" AND c.status = $%d", len(args))
+	}
+
+	countyClause := ""
+	if filter.County != "" {
+		args = append(args, filter.County)
+		countyClause = fmt.Sprintf(" AND c.county = $%d", len(args))
+	}
+
 	query := `
 	SELECT
 		c.id, c.reference_no, c.child_name, c.age, c.gender, c.status,
@@ -128,12 +147,13 @@ func (r *CaseRepo) ListGeoPoints(ctx context.Context, filter CaseFilter) ([]mode
 		m.thumb_url
 	FROM cases c
 	LEFT JOIN media m ON m.case_id = c.id AND m.is_primary = TRUE
-	WHERE c.deleted_at IS NULL
-	` + filter.toWhereClause() + `
+	WHERE c.deleted_at IS NULL` +
+		statusClause +
+		countyClause + `
 	ORDER BY c.missing_since DESC
 	LIMIT $1 OFFSET $2`
 
-	rows, err := r.db.Query(ctx, query, filter.Limit, filter.Offset)
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list geo points: %w", err)
 	}
@@ -147,14 +167,13 @@ func (r *CaseRepo) ListGeoPoints(ctx context.Context, filter CaseFilter) ([]mode
 			&p.Status, &p.County, &p.Lat, &p.Lng,
 			&p.MissingSince, &p.ThumbnailURL,
 		); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan geo point: %w", err)
 		}
 		points = append(points, p)
 	}
 	return points, rows.Err()
 }
 
-// UpdateStatus changes the status of a case.
 func (r *CaseRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status models.CaseStatus, resolution string, updatedBy uuid.UUID) error {
 	var resolvedAt *time.Time
 	if status == models.CaseStatusResolved || status == models.CaseStatusClosed {
@@ -170,9 +189,8 @@ func (r *CaseRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status models
 	return err
 }
 
-// NearbyActiveCases uses PostGIS ST_DWithin to find active cases within radius metres.
 func (r *CaseRepo) NearbyActiveCases(ctx context.Context, lat, lng, radiusMetres float64) ([]models.CaseGeoPoint, error) {
-	query := `
+	const query = `
 	SELECT
 		c.id, c.reference_no, c.child_name, c.age, c.gender, c.status,
 		c.county,
@@ -193,35 +211,35 @@ func (r *CaseRepo) NearbyActiveCases(ctx context.Context, lat, lng, radiusMetres
 
 	rows, err := r.db.Query(ctx, query, lat, lng, radiusMetres)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("nearby active cases: %w", err)
 	}
 	defer rows.Close()
 
 	var results []models.CaseGeoPoint
 	for rows.Next() {
 		var p models.CaseGeoPoint
-		if err := rows.Scan(&p.ID, &p.ReferenceNo, &p.ChildName, &p.Age, &p.Gender,
-			&p.Status, &p.County, &p.Lat, &p.Lng, &p.MissingSince, &p.ThumbnailURL); err != nil {
-			return nil, err
+		if err := rows.Scan(
+			&p.ID, &p.ReferenceNo, &p.ChildName, &p.Age, &p.Gender,
+			&p.Status, &p.County, &p.Lat, &p.Lng, &p.MissingSince, &p.ThumbnailURL,
+		); err != nil {
+			return nil, fmt.Errorf("scan nearby point: %w", err)
 		}
 		results = append(results, p)
 	}
 	return results, rows.Err()
 }
 
-// GenerateReferenceNo creates the human-readable case number e.g. KE-2024-00042
 func (r *CaseRepo) GenerateReferenceNo(ctx context.Context) (string, error) {
 	var seq int
-	err := r.db.QueryRow(ctx, `SELECT nextval('case_reference_seq')`).Scan(&seq)
-	if err != nil {
-		return "", err
+	if err := r.db.QueryRow(ctx, `SELECT nextval('case_reference_seq')`).Scan(&seq); err != nil {
+		return "", fmt.Errorf("generate reference number: %w", err)
 	}
 	return fmt.Sprintf("KE-%d-%05d", time.Now().Year(), seq), nil
 }
 
 func (r *CaseRepo) mediaRepo() *MediaRepo { return &MediaRepo{db: r.db} }
 
-// ─── Media Repository ─────────────────────────────────────────────────────────
+// ── Media Repository ──────────────────────────────────────────────────────────
 
 type MediaRepo struct{ db *pgxpool.Pool }
 
@@ -242,21 +260,24 @@ func (r *MediaRepo) ByCaseID(ctx context.Context, caseID uuid.UUID) ([]models.Me
 		SELECT id, case_id, url, thumb_url, mime_type, size_bytes, is_primary, created_at
 		FROM media WHERE case_id = $1 ORDER BY is_primary DESC, created_at ASC`, caseID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("media by case id: %w", err)
 	}
 	defer rows.Close()
+
 	var media []models.Media
 	for rows.Next() {
 		var m models.Media
-		if err := rows.Scan(&m.ID, &m.CaseID, &m.URL, &m.ThumbURL, &m.MimeType, &m.SizeBytes, &m.IsPrimary, &m.CreatedAt); err != nil {
-			return nil, err
+		if err := rows.Scan(
+			&m.ID, &m.CaseID, &m.URL, &m.ThumbURL, &m.MimeType, &m.SizeBytes, &m.IsPrimary, &m.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan media: %w", err)
 		}
 		media = append(media, m)
 	}
 	return media, rows.Err()
 }
 
-// ─── User Repository ──────────────────────────────────────────────────────────
+// ── User Repository ───────────────────────────────────────────────────────────
 
 type UserRepo struct{ db *pgxpool.Pool }
 
@@ -277,9 +298,11 @@ func (r *UserRepo) GetByEmail(ctx context.Context, email string) (*models.User, 
 	err := r.db.QueryRow(ctx, `
 		SELECT id, email, phone, full_name, role, county, password_hash, is_verified, is_active, last_login_at, created_at, updated_at
 		FROM users WHERE email = $1 AND is_active = TRUE`, email,
-	).Scan(&u.ID, &u.Email, &u.Phone, &u.FullName, &u.Role, &u.County,
-		&u.PasswordHash, &u.IsVerified, &u.IsActive, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt)
-	if err == pgx.ErrNoRows {
+	).Scan(
+		&u.ID, &u.Email, &u.Phone, &u.FullName, &u.Role, &u.County,
+		&u.PasswordHash, &u.IsVerified, &u.IsActive, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	return &u, err
@@ -290,7 +313,7 @@ func (r *UserRepo) UpdateLastLogin(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
-// ─── Broadcast Repository ─────────────────────────────────────────────────────
+// ── Broadcast Repository ──────────────────────────────────────────────────────
 
 type BroadcastRepo struct{ db *pgxpool.Pool }
 
@@ -307,31 +330,25 @@ func (r *BroadcastRepo) Insert(ctx context.Context, b *models.BroadcastRecord) e
 }
 
 func (r *BroadcastRepo) MarkDelivered(ctx context.Context, messageID string) error {
-	_, err := r.db.Exec(ctx, `
-		UPDATE broadcast_records SET status='delivered', delivered_at=NOW() WHERE message_id=$1`, messageID)
+	_, err := r.db.Exec(ctx,
+		`UPDATE broadcast_records SET status='delivered', delivered_at=NOW() WHERE message_id=$1`,
+		messageID,
+	)
 	return err
 }
 
-// ─── Filter helpers ───────────────────────────────────────────────────────────
+// ── CaseFilter ────────────────────────────────────────────────────────────────
 
+// CaseFilter holds query parameters for listing cases.
+// It intentionally has NO toWhereClause() method — filters are now applied
+// via parameterised arguments in ListGeoPoints, never via string interpolation.
 type CaseFilter struct {
-	Status  *models.CaseStatus
-	County  string
-	Limit   int
-	Offset  int
+	Status *models.CaseStatus
+	County string
+	Limit  int
+	Offset int
 }
 
-func (f CaseFilter) toWhereClause() string {
-	clauses := ""
-	if f.Status != nil {
-		clauses += fmt.Sprintf(" AND c.status = '%s'", *f.Status)
-	}
-	if f.County != "" {
-		clauses += fmt.Sprintf(" AND c.county = '%s'", f.County)
-	}
-	return clauses
-}
+// ── Sentinel errors ───────────────────────────────────────────────────────────
 
-// ─── Errors ───────────────────────────────────────────────────────────────────
-
-var ErrNotFound = fmt.Errorf("record not found")
+var ErrNotFound = errors.New("record not found")
